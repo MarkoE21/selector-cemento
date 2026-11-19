@@ -4,6 +4,7 @@ Selector de cemento adicionado · Hackathon Innova Sur 2026 · Reto 2 · Yura S.
 
 Ejecutar:  streamlit run app.py
 """
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -30,14 +31,50 @@ def entrenar_cache(fuente: bytes, validacion: str, regla: str, n_arboles: int):
 # BARRA LATERAL
 # ----------------------------------------------------------------------------
 st.sidebar.title("🏗️ Configuración")
-origen = st.sidebar.radio("Datos", ["Base incluida (tesis UCSM 2020)", "Subir Excel actualizado"])
-if origen.startswith("Subir"):
+
+
+@st.cache_data(ttl=600, show_spinner="Descargando datos de Google Sheets…")
+def bajar_sheets(enlace: str):
+    """Se vuelve a descargar como máximo cada 10 minutos."""
+    return motor.descargar_google_sheets(enlace), datetime.now().strftime("%d/%m/%Y %H:%M")
+
+
+def secreto(nombre):
+    try:
+        return st.secrets.get(nombre)
+    except Exception:  # no hay archivo de secretos configurado
+        return None
+
+
+OPC_BASE, OPC_SUBIR, OPC_SHEETS = ("Base incluida (tesis UCSM 2020)", "Subir Excel actualizado",
+                                   "Google Sheets (automático)")
+enlace_secreto = secreto("GSHEET_ID")
+origen = st.sidebar.radio("Datos", [OPC_BASE, OPC_SUBIR, OPC_SHEETS],
+                          index=2 if enlace_secreto else 0)
+
+if origen == OPC_SUBIR:
     archivo = st.sidebar.file_uploader("Excel de la base (mismo formato)", type=["xlsx"])
     if archivo is None:
         st.title("🏗️ Selector de cemento adicionado")
-        st.info("Sube el Excel actualizado en la barra lateral, o elige la base incluida.")
+        st.info("Sube el Excel actualizado en la barra lateral, o elige otra fuente de datos.")
         st.stop()
     fuente = archivo.getvalue()
+elif origen == OPC_SHEETS:
+    enlace = enlace_secreto or st.sidebar.text_input("Enlace de la hoja de Google Sheets")
+    if not enlace:
+        st.title("🏗️ Selector de cemento adicionado")
+        st.info("Pega el enlace de tu Google Sheet en la barra lateral (debe estar compartido como "
+                "'Cualquier persona con el enlace').")
+        st.stop()
+    try:
+        fuente, hora = bajar_sheets(enlace)
+    except ValueError as e:
+        st.error(str(e))
+        st.stop()
+    st.sidebar.caption(f"Datos leídos de Google Sheets: {hora}. Se actualizan solos cada 10 minutos.")
+    if st.sidebar.button("🔄 Actualizar ahora"):
+        bajar_sheets.clear()
+        st.rerun()
 else:
     if not RUTA_BASE.exists():
         st.error(f"No se encontró {RUTA_BASE}. Copia el Excel en la carpeta 'datos'.")

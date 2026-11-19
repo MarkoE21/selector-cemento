@@ -4,6 +4,8 @@ Lógica de la app (sin Streamlit): entrenar, recomendar y predecir mezclas nueva
 Reutiliza las funciones de ml_concreto.py.
 """
 import io
+import re
+import urllib.request
 
 import joblib
 import numpy as np
@@ -215,3 +217,36 @@ def exportar_modelo(R):
     buf = io.BytesIO()
     joblib.dump({"modelo": R["modelo"], "features": ml.FEATURES, "nombre": R["mejor"]}, buf)
     return buf.getvalue()
+
+
+# ----------------------------------------------------------------------------
+# GOOGLE SHEETS (lectura automática)
+# ----------------------------------------------------------------------------
+def id_google_sheets(texto: str) -> str:
+    """Acepta el enlace completo de la hoja o solo su ID."""
+    texto = (texto or "").strip()
+    m = re.search(r"/d/([a-zA-Z0-9_-]+)", texto)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[a-zA-Z0-9_-]{20,}", texto):
+        return texto
+    raise ValueError("No reconozco el enlace de Google Sheets. Pega el enlace completo de la hoja.")
+
+
+def descargar_google_sheets(texto: str) -> bytes:
+    """Descarga el libro completo como Excel (.xlsx). La hoja debe estar compartida como
+    'Cualquier persona con el enlace' (lector)."""
+    sid = id_google_sheets(texto)
+    url = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            datos = r.read()
+    except Exception as e:
+        raise ValueError(f"No se pudo descargar la hoja ({e}). Revisa el enlace y que esté compartida "
+                         f"como 'Cualquier persona con el enlace'.")
+    if not datos.startswith(b"PK"):  # un .xlsx es un zip; si no, Google devolvió una página de error
+        raise ValueError("Google no devolvió un Excel. Revisa que la hoja sea un Google Sheet nativo "
+                         "(Archivo > Guardar como Hojas de cálculo de Google) y que esté compartida "
+                         "como 'Cualquier persona con el enlace'.")
+    return datos
